@@ -49,10 +49,10 @@ class EnhancedMapRenderer:
         """Create multiple ground sprite variations."""
         self.ground_sprites = []
         base_colors = [
-            (100, 180, 100),  # Light green
-            (90, 170, 90),    # Slightly darker green
-            (110, 190, 110),  # Slightly lighter green
-            (95, 175, 95)     # Medium green
+            (190, 170, 110),
+            (180, 160, 100),
+            (200, 180, 120),
+            (170, 150, 90)
         ]
         
         for i, base_color in enumerate(base_colors):
@@ -86,9 +86,9 @@ class EnhancedMapRenderer:
         self.wall_sprite = pygame.Surface((self.cell_size, self.cell_size))
         
         # Base colors
-        base_color = (100, 100, 100)
-        dark_color = (60, 60, 60)
-        light_color = (140, 140, 140)
+        base_color = (70, 70, 70)
+        dark_color = (35, 35, 35)
+        light_color = (120, 120, 120)
         
         # Fill with base color
         self.wall_sprite.fill(base_color)
@@ -131,12 +131,12 @@ class EnhancedMapRenderer:
         self.rock_pile_sprite = pygame.Surface((self.cell_size, self.cell_size), pygame.SRCALPHA)
         self.rock_pile_sprite.fill((0, 0, 0, 0))
         
-        base_color = (139, 69, 19)
+        base_color = (110, 110, 110)
         rock_colors = [
-            (120, 60, 15),
-            (160, 80, 25),
-            (100, 50, 10),
-            (180, 90, 30)
+            (90, 90, 90),
+            (120, 120, 120),
+            (70, 70, 70),
+            (150, 150, 150)
         ]
         
         # Draw multiple rocks with varying sizes and colors
@@ -184,13 +184,13 @@ class EnhancedMapRenderer:
         barrel_y = 3
         
         # Base colors
-        barrel_color = (180, 30, 30)
-        dark_color = (120, 20, 20)
-        light_color = (220, 60, 60)
+        barrel_color = (210, 170, 30)
+        dark_color = (140, 100, 20)
+        light_color = (240, 210, 80)
         
         # Draw barrel shadow
         pygame.draw.ellipse(self.petrol_barrel_sprite, (0, 0, 0, 100), 
-                           (barrel_x + 2, barrel_y + barrel_height - 2, barrel_width, 4))
+                        (barrel_x + 2, barrel_y + barrel_height - 2, barrel_width, 4))
         
         # Draw main barrel body
         pygame.draw.rect(self.petrol_barrel_sprite, dark_color, 

@@ -1,7 +1,7 @@
 """
 Main entry point for the Tank Game.
 """
-
+import random
 import pygame
 import sys
 import os
@@ -28,28 +28,174 @@ from src.renderers.objective_renderer import ObjectiveRenderer
 MAX_LEVEL = 3
 
 
+def is_valid_objective_cell(cell_x, cell_y, map_data, game_engine=None):
+    """
+    Check if a cell is valid for placing an objective.
+    The objective cannot appear on walls, rocks, barrels or other objects.
+    """
+
+    if map_data is None:
+        return True
+
+    if cell_x < 0 or cell_y < 0:
+        return False
+
+    if cell_x >= map_data.width or cell_y >= map_data.height:
+        return False
+
+    cell_type = map_data.get_cell(cell_x, cell_y)
+
+    if cell_type != map_data.EMPTY:
+        return False
+
+    if game_engine is not None:
+        for obj in game_engine.get_game_objects():
+            if not getattr(obj, "active", True):
+                continue
+
+            obj_cell_x = int(obj.x // map_data.cell_size)
+            obj_cell_y = int(obj.y // map_data.cell_size)
+
+            if obj_cell_x == cell_x and obj_cell_y == cell_y:
+                return False
+
+    return True
+
+
+def find_nearest_valid_objective_cell(preferred_cell, map_data, game_engine=None):
+    """
+    Find the nearest valid cell around the preferred position.
+    """
+
+    preferred_x, preferred_y = preferred_cell
+
+    if is_valid_objective_cell(preferred_x, preferred_y, map_data, game_engine):
+        return preferred_x, preferred_y
+
+    for radius in range(1, 10):
+        possible_cells = []
+
+        for dx in range(-radius, radius + 1):
+            possible_cells.append((preferred_x + dx, preferred_y - radius))
+            possible_cells.append((preferred_x + dx, preferred_y + radius))
+
+        for dy in range(-radius + 1, radius):
+            possible_cells.append((preferred_x - radius, preferred_y + dy))
+            possible_cells.append((preferred_x + radius, preferred_y + dy))
+
+        for cell_x, cell_y in possible_cells:
+            if is_valid_objective_cell(cell_x, cell_y, map_data, game_engine):
+                return cell_x, cell_y
+
+    for y in range(1, map_data.height - 1):
+        for x in range(1, map_data.width - 1):
+            if is_valid_objective_cell(x, y, map_data, game_engine):
+                return x, y
+
+    return preferred_x, preferred_y
+
+
+def is_valid_cell_for_objective(cell_x, cell_y, map_data, game_engine=None):
+    """
+    Check if a cell is free for placing an objective.
+    """
+
+    if map_data is None:
+        return False
+
+    if cell_x < 0 or cell_y < 0:
+        return False
+
+    if cell_x >= map_data.width or cell_y >= map_data.height:
+        return False
+
+    if map_data.get_cell(cell_x, cell_y) != map_data.EMPTY:
+        return False
+
+    if game_engine is not None:
+        for obj in game_engine.get_game_objects():
+            if not getattr(obj, "active", True):
+                continue
+
+            obj_cell_x = int(obj.x // map_data.cell_size)
+            obj_cell_y = int(obj.y // map_data.cell_size)
+
+            if obj_cell_x == cell_x and obj_cell_y == cell_y:
+                return False
+
+    return True
+
+
+def find_two_free_cells_together(preferred_cell, map_data, game_engine=None):
+    """
+    Find two nearby free cells for placing both primary objectives together.
+    """
+
+    preferred_x, preferred_y = preferred_cell
+
+    possible_pairs = [
+        ((preferred_x, preferred_y), (preferred_x + 1, preferred_y)),
+        ((preferred_x, preferred_y), (preferred_x - 1, preferred_y)),
+        ((preferred_x, preferred_y), (preferred_x, preferred_y + 1)),
+        ((preferred_x, preferred_y), (preferred_x, preferred_y - 1)),
+    ]
+
+    for cell_a, cell_b in possible_pairs:
+        if (
+            is_valid_cell_for_objective(cell_a[0], cell_a[1], map_data, game_engine)
+            and is_valid_cell_for_objective(cell_b[0], cell_b[1], map_data, game_engine)
+        ):
+            return cell_a, cell_b
+
+    for radius in range(1, 10):
+        for y in range(preferred_y - radius, preferred_y + radius + 1):
+            for x in range(preferred_x - radius, preferred_x + radius + 1):
+
+                possible_pairs = [
+                    ((x, y), (x + 1, y)),
+                    ((x, y), (x - 1, y)),
+                    ((x, y), (x, y + 1)),
+                    ((x, y), (x, y - 1)),
+                ]
+
+                random.shuffle(possible_pairs)
+
+                for cell_a, cell_b in possible_pairs:
+                    if (
+                        is_valid_cell_for_objective(cell_a[0], cell_a[1], map_data, game_engine)
+                        and is_valid_cell_for_objective(cell_b[0], cell_b[1], map_data, game_engine)
+                    ):
+                        return cell_a, cell_b
+
+    return (preferred_x, preferred_y), (preferred_x + 1, preferred_y)
+
+
 def create_level_objectives(game_engine, level_manager, level_number):
     """
-    Create the two required primary objective types for each level.
+    Create the two required primary objective types together.
+    Both objectives appear next to each other so one tank can guard them.
     """
 
+    map_data = level_manager.map_data
     cell_size = 32
 
-    if level_manager.map_data and hasattr(level_manager.map_data, "cell_size"):
-        cell_size = level_manager.map_data.cell_size
+    if map_data and hasattr(map_data, "cell_size"):
+        cell_size = map_data.cell_size
 
-    # Different objective positions per level.
     if level_number == 1:
-        base_cell = (18, 6)
-        radar_cell = (21, 12)
+        preferred_cell = (18, 8)
 
     elif level_number == 2:
-        base_cell = (20, 5)
-        radar_cell = (16, 13)
+        preferred_cell = (19, 9)
 
     else:
-        base_cell = (22, 4)
-        radar_cell = (19, 14)
+        preferred_cell = (20, 10)
+
+    base_cell, radar_cell = find_two_free_cells_together(
+        preferred_cell,
+        map_data,
+        game_engine
+    )
 
     base_objective = BaseObjective(
         base_cell[0] * cell_size,
@@ -66,7 +212,338 @@ def create_level_objectives(game_engine, level_manager, level_number):
     for objective in objectives:
         game_engine.add_game_object(objective)
 
+    print(f"Base objective placed at cell {base_cell}")
+    print(f"Radar objective placed at cell {radar_cell}")
+
     return objectives
+
+
+
+
+def distance_between_cells(cell_a, cell_b):
+    """
+    Calculate Manhattan distance between two cells.
+    """
+
+    return abs(cell_a[0] - cell_b[0]) + abs(cell_a[1] - cell_b[1])
+
+
+def is_valid_player_spawn_cell(cell_x, cell_y, map_data, game_engine, objectives, min_distance=8):
+    """
+    Check if a cell is valid for spawning the player.
+    The player cannot appear on obstacles, objects or close to primary objectives.
+    """
+
+    if map_data is None:
+        return False
+
+    if cell_x < 0 or cell_y < 0:
+        return False
+
+    if cell_x >= map_data.width or cell_y >= map_data.height:
+        return False
+
+    if map_data.get_cell(cell_x, cell_y) != map_data.EMPTY:
+        return False
+
+    for objective in objectives:
+        objective_cell_x = int(objective.x // map_data.cell_size)
+        objective_cell_y = int(objective.y // map_data.cell_size)
+
+        distance = distance_between_cells(
+            (cell_x, cell_y),
+            (objective_cell_x, objective_cell_y)
+        )
+
+        if distance < min_distance:
+            return False
+
+    if game_engine is not None:
+        for obj in game_engine.get_game_objects():
+            if not getattr(obj, "active", True):
+                continue
+
+            if getattr(obj, "tag", None) == "player":
+                continue
+
+            obj_cell_x = int(obj.x // map_data.cell_size)
+            obj_cell_y = int(obj.y // map_data.cell_size)
+
+            if obj_cell_x == cell_x and obj_cell_y == cell_y:
+                return False
+
+    return True
+
+
+def place_player_far_from_objectives(player_tank, game_engine, level_manager, objectives, min_distance=8):
+    """
+    Place the player far from the primary objectives.
+    """
+
+    map_data = level_manager.map_data
+
+    if map_data is None:
+        return
+
+    valid_cells = []
+
+    for y in range(1, map_data.height - 1):
+        for x in range(1, map_data.width - 1):
+            if is_valid_player_spawn_cell(
+                x,
+                y,
+                map_data,
+                game_engine,
+                objectives,
+                min_distance
+            ):
+                valid_cells.append((x, y))
+
+    if not valid_cells:
+        print("Warning: No far spawn found for player. Keeping current position.")
+        return
+
+    # Choose one of the farthest cells from the objectives.
+    def total_distance_to_objectives(cell):
+        total = 0
+
+        for objective in objectives:
+            objective_cell = (
+                int(objective.x // map_data.cell_size),
+                int(objective.y // map_data.cell_size)
+            )
+
+            total += distance_between_cells(cell, objective_cell)
+
+        return total
+
+    valid_cells.sort(
+        key=total_distance_to_objectives,
+        reverse=True
+    )
+
+    # Pick among the best far cells so it is not always exactly the same.
+    best_cells = valid_cells[:min(10, len(valid_cells))]
+    spawn_cell = random.choice(best_cells)
+
+    player_tank.x = spawn_cell[0] * map_data.cell_size
+    player_tank.y = spawn_cell[1] * map_data.cell_size
+
+    print(f"Player spawned far from objectives at cell {spawn_cell}")
+
+
+def find_guard_cell_near_objectives(objectives, map_data):
+    """
+    Find a free cell near the group of primary objectives.
+    """
+
+    if not objectives or map_data is None:
+        return None
+
+    center_x = sum(int(obj.x // map_data.cell_size) for obj in objectives) // len(objectives)
+    center_y = sum(int(obj.y // map_data.cell_size) for obj in objectives) // len(objectives)
+
+    for radius in range(1, 6):
+        possible_cells = []
+
+        for dx in range(-radius, radius + 1):
+            possible_cells.append((center_x + dx, center_y - radius))
+            possible_cells.append((center_x + dx, center_y + radius))
+
+        for dy in range(-radius + 1, radius):
+            possible_cells.append((center_x - radius, center_y + dy))
+            possible_cells.append((center_x + radius, center_y + dy))
+
+        random.shuffle(possible_cells)
+
+        for cell_x, cell_y in possible_cells:
+            if cell_x < 0 or cell_y < 0:
+                continue
+
+            if cell_x >= map_data.width or cell_y >= map_data.height:
+                continue
+
+            if map_data.get_cell(cell_x, cell_y) != map_data.EMPTY:
+                continue
+
+            return cell_x, cell_y
+
+    return None
+
+
+def assign_single_guard_to_objectives(enemy_tanks, objectives, map_data):
+    """
+    Assign only one enemy tank to guard both primary objectives.
+    The guardian appears near the objectives and is limited to that area.
+    """
+
+    if not enemy_tanks or not objectives or map_data is None:
+        return None
+
+    available_enemies = [
+        enemy for enemy in enemy_tanks
+        if enemy is not None and enemy.active
+    ]
+
+    if not available_enemies:
+        return None
+
+    guardian = random.choice(available_enemies)
+
+    guard_cell = find_guard_cell_near_objectives(objectives, map_data)
+
+    if guard_cell is not None:
+        guardian.x = guard_cell[0] * map_data.cell_size
+        guardian.y = guard_cell[1] * map_data.cell_size
+
+    center_x = sum(objective.x for objective in objectives) / len(objectives)
+    center_y = sum(objective.y for objective in objectives) / len(objectives)
+
+    guardian.is_objective_guard = True
+    guardian.guarded_objectives = objectives
+    guardian.guard_center_x = center_x
+    guardian.guard_center_y = center_y
+    guardian.guard_limit_radius = 180
+
+    print(
+        f"One guardian assigned to both objectives: "
+        f"{getattr(guardian, 'enemy_type', 'enemy')}"
+    )
+
+    return guardian
+
+
+
+def keep_guardian_near_objectives(enemy_tank, map_data):
+    """
+    Keep the objective guardian close to the primary objectives.
+    If the guardian moves too far away, it is returned near the objectives.
+    """
+
+    if enemy_tank is None:
+        return
+
+    if not getattr(enemy_tank, "active", True):
+        return
+
+    if not getattr(enemy_tank, "is_objective_guard", False):
+        return
+
+    if not hasattr(enemy_tank, "guard_center_x"):
+        return
+
+    dx = enemy_tank.x - enemy_tank.guard_center_x
+    dy = enemy_tank.y - enemy_tank.guard_center_y
+
+    distance = math.sqrt(dx * dx + dy * dy)
+
+    if distance <= enemy_tank.guard_limit_radius:
+        return
+
+    objectives = getattr(enemy_tank, "guarded_objectives", [])
+
+    guard_cell = find_guard_cell_near_objectives(
+        objectives,
+        map_data
+    )
+
+    if guard_cell is not None:
+        enemy_tank.x = guard_cell[0] * map_data.cell_size
+        enemy_tank.y = guard_cell[1] * map_data.cell_size
+
+    enemy_tank.current_move_direction = None
+
+    if hasattr(enemy_tank, "state"):
+        enemy_tank.state = "patrol"
+
+        
+
+def find_guard_cell_around_objective(objective, map_data, used_cells=None):
+    """
+    Find a free cell near an objective where a guardian tank can be placed.
+    """
+
+    if used_cells is None:
+        used_cells = set()
+
+    objective_cell_x = int(objective.x // map_data.cell_size)
+    objective_cell_y = int(objective.y // map_data.cell_size)
+
+    for radius in range(1, 5):
+        possible_cells = []
+
+        for dx in range(-radius, radius + 1):
+            possible_cells.append((objective_cell_x + dx, objective_cell_y - radius))
+            possible_cells.append((objective_cell_x + dx, objective_cell_y + radius))
+
+        for dy in range(-radius + 1, radius):
+            possible_cells.append((objective_cell_x - radius, objective_cell_y + dy))
+            possible_cells.append((objective_cell_x + radius, objective_cell_y + dy))
+
+        random.shuffle(possible_cells)
+
+        for cell_x, cell_y in possible_cells:
+            if cell_x < 0 or cell_y < 0:
+                continue
+
+            if cell_x >= map_data.width or cell_y >= map_data.height:
+                continue
+
+            if (cell_x, cell_y) in used_cells:
+                continue
+
+            if map_data.get_cell(cell_x, cell_y) != map_data.EMPTY:
+                continue
+
+            return cell_x, cell_y
+
+    return None
+
+
+def assign_objective_guards(enemy_tanks, objectives, map_data):
+    """
+    Assign exactly one enemy tank to defend each primary objective.
+    """
+
+    if not enemy_tanks or not objectives or map_data is None:
+        return
+
+    available_enemies = [
+        enemy for enemy in enemy_tanks
+        if enemy is not None and enemy.active
+    ]
+
+    used_cells = set()
+
+    for objective in objectives:
+        if not available_enemies:
+            break
+
+        guardian = random.choice(available_enemies)
+        available_enemies.remove(guardian)
+
+        guard_cell = find_guard_cell_around_objective(
+            objective,
+            map_data,
+            used_cells
+        )
+
+        if guard_cell is not None:
+            used_cells.add(guard_cell)
+
+            guardian.x = guard_cell[0] * map_data.cell_size
+            guardian.y = guard_cell[1] * map_data.cell_size
+
+        if hasattr(guardian, "set_guard_objective"):
+            guardian.set_guard_objective(objective)
+        else:
+            guardian.is_guardian = True
+            guardian.guard_objective = objective
+
+        print(
+            f"Guardian assigned: {getattr(guardian, 'enemy_type', 'enemy')} "
+            f"guards {getattr(objective, 'objective_type', 'objective')}"
+        )
 
 
 def all_objectives_destroyed(objectives):
@@ -122,7 +599,16 @@ def projectile_hits_map(projectile, map_data):
 def handle_projectile_collision(projectile, possible_targets, visual_effects=None):
     """
     Check projectile collisions against tanks and objectives.
+
+    Rules:
+    - Player bullets can damage enemy tanks and objectives.
+    - Enemy bullets can damage only the player.
+    - Enemy bullets cannot damage other enemy tanks.
+    - A projectile cannot damage its owner.
     """
+
+    projectile_owner = getattr(projectile, "owner", None)
+    owner_tag = getattr(projectile_owner, "tag", None)
 
     for target in possible_targets:
         if target is None:
@@ -131,10 +617,24 @@ def handle_projectile_collision(projectile, possible_targets, visual_effects=Non
         if not getattr(target, "active", True):
             continue
 
-        if target == projectile.owner:
+        if target == projectile_owner:
             continue
 
         if getattr(target, "tag", None) == "projectile":
+            continue
+
+        target_tag = getattr(target, "tag", None)
+
+        # Enemy bullets cannot damage enemy tanks.
+        if owner_tag == "enemy" and target_tag == "enemy":
+            continue
+
+        # Enemy bullets should not damage objectives.
+        if owner_tag == "enemy" and target_tag == "objective":
+            continue
+
+        # Player bullets should not damage the player.
+        if owner_tag == "player" and target_tag == "player":
             continue
 
         if projectile.check_collision_with_object(target):
@@ -240,6 +740,57 @@ def render_center_message(screen, title, subtitle=None, extra=None):
         screen.blit(extra_surface, extra_rect)
 
 
+def render_start_screen(screen):
+    """
+    Render the initial start screen with a start button.
+    """
+
+    screen.fill((20, 20, 20))
+
+    title_font = pygame.font.SysFont("Arial", 54, bold=True)
+    subtitle_font = pygame.font.SysFont("Arial", 26)
+    button_font = pygame.font.SysFont("Arial", 30, bold=True)
+
+    title_surface = title_font.render("TANK ATTACK", True, (255, 255, 255))
+    title_rect = title_surface.get_rect(
+        center=(screen.get_width() // 2, 170)
+    )
+    screen.blit(title_surface, title_rect)
+
+    subtitle_surface = subtitle_font.render(
+        "Destruye los objetivos primarios y sobrevive",
+        True,
+        (220, 220, 220)
+    )
+    subtitle_rect = subtitle_surface.get_rect(
+        center=(screen.get_width() // 2, 230)
+    )
+    screen.blit(subtitle_surface, subtitle_rect)
+
+    button_rect = pygame.Rect(0, 0, 240, 70)
+    button_rect.center = (screen.get_width() // 2, 340)
+
+    pygame.draw.rect(screen, (40, 120, 220), button_rect, border_radius=12)
+    pygame.draw.rect(screen, (255, 255, 255), button_rect, 3, border_radius=12)
+
+    button_text = button_font.render("INICIAR JUEGO", True, (255, 255, 255))
+    button_text_rect = button_text.get_rect(center=button_rect.center)
+    screen.blit(button_text, button_text_rect)
+
+    instruction_surface = subtitle_font.render(
+        "También puede presionar ENTER para iniciar",
+        True,
+        (180, 180, 180)
+    )
+    instruction_rect = instruction_surface.get_rect(
+        center=(screen.get_width() // 2, 430)
+    )
+    screen.blit(instruction_surface, instruction_rect)
+
+    return button_rect
+
+
+
 def render_hud(screen, current_level, player_tank, objectives):
     """
     Render basic HUD information.
@@ -306,6 +857,20 @@ def create_game_state(game_engine, level_number):
         level_manager.level_number = level_number
 
     objectives = create_level_objectives(game_engine, level_manager, level_number)
+
+    place_player_far_from_objectives(
+        player_tank,
+        game_engine,
+        level_manager,
+        objectives,
+        min_distance=8
+    )
+
+    assign_single_guard_to_objectives(
+        level_manager.enemy_tanks,
+        objectives,
+        level_manager.map_data
+    )
 
     projectiles = []
 
@@ -399,6 +964,7 @@ def main():
         game_over = False
         level_completed = False
         final_victory = False
+        game_started = False
 
         game_engine.running = True
 
@@ -406,6 +972,23 @@ def main():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     game_engine.running = False
+                
+                elif not game_started:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_RETURN:
+                            game_started = True
+
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        if event.button == 1:
+                            mouse_pos = pygame.mouse.get_pos()
+                            start_button_rect = pygame.Rect(0, 0, 240, 70)
+                            start_button_rect.center = (
+                                game_engine.screen.get_width() // 2,
+                                340
+                            )
+
+                            if start_button_rect.collidepoint(mouse_pos):
+                                game_started = True
 
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
@@ -443,6 +1026,12 @@ def main():
 
             game_engine.calculate_delta_time()
             input_handler.process_events()
+
+            if not game_started:
+                render_start_screen(game_engine.screen)
+                pygame.display.flip()
+                game_engine.clock.tick(game_engine.target_fps)
+                continue
 
             # -------------------------------------------------
             # If the game ended or level was completed
@@ -549,6 +1138,11 @@ def main():
                         game_engine.delta_time,
                         level_manager.map_data,
                         game_objects_for_ai
+                    )
+
+                    keep_guardian_near_objectives(
+                        enemy_tank,
+                        level_manager.map_data
                     )
 
                     if new_projectile:

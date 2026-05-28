@@ -3,9 +3,11 @@ Enemy Tank Spawner module for the Tank Game.
 
 This module creates enemy tanks for each level.
 
-Adapted for Tank-Attack:
-- Creates three different enemy tank types.
-- Keeps compatibility with LevelManager calls.
+For Tank-Attack:
+- Every level has exactly three enemy tanks.
+- One LightEnemyTank.
+- One HeavyEnemyTank.
+- One SniperEnemyTank.
 """
 
 import random
@@ -25,38 +27,23 @@ class EnemyTankSpawner:
     def __init__(self, map_data=None, cell_size=32):
         """
         Initialize the enemy tank spawner.
-
-        Args:
-            map_data: Map data used to validate positions.
-            cell_size (int): Size of each map cell in pixels.
         """
+
         self.map_data = map_data
         self.cell_size = cell_size
+
+        if map_data and hasattr(map_data, "cell_size"):
+            self.cell_size = map_data.cell_size
 
     def set_map_data(self, map_data):
         """
         Set or update the map data.
         """
+
         self.map_data = map_data
 
         if map_data and hasattr(map_data, "cell_size"):
             self.cell_size = map_data.cell_size
-
-    def _create_enemy_tank(self, x, y, difficulty):
-        """
-        Create one of the three enemy tank types.
-        """
-
-        enemy_classes = [
-            LightEnemyTank,
-            HeavyEnemyTank,
-            SniperEnemyTank
-        ]
-
-        enemy_class = random.choice(enemy_classes)
-        enemy_tank = enemy_class(x, y, difficulty=difficulty)
-
-        return enemy_tank
 
     def spawn_enemy_tanks(
         self,
@@ -67,152 +54,111 @@ class EnemyTankSpawner:
         count=None
     ):
         """
-        Spawn enemy tanks for a level.
-
-        This signature is compatible with LevelManager, which calls:
-
-        spawn_enemy_tanks(level_number, player_position, game_engine, difficulty_manager)
-
-        Args:
-            level_number (int): Current level.
-            player_position (tuple): Player position in pixels or cells.
-            game_engine: Current game engine.
-            difficulty_manager: Optional difficulty manager.
-            count (int): Optional number of enemies.
-
-        Returns:
-            list: List of enemy tanks.
+        Spawn exactly three enemy tanks per level:
+        one light, one heavy and one sniper.
         """
-
-        difficulty = self._get_difficulty(level_number, difficulty_manager)
-
-        if count is None:
-            count = self._get_enemy_count_for_level(level_number)
 
         enemy_tanks = []
 
-        for _ in range(count):
-            position = self._find_valid_spawn_position(
-                player_position=player_position,
-                game_engine=game_engine
+        enemy_classes_to_spawn = [
+            LightEnemyTank,
+            HeavyEnemyTank,
+            SniperEnemyTank
+        ]
+
+        difficulties = [
+            level_number,
+            level_number,
+            level_number
+        ]
+
+        if difficulty_manager is not None:
+            difficulties = difficulty_manager.get_enemy_tank_difficulties(
+                level_number,
+                3
             )
 
-            if position is None:
-                position = self._find_fallback_position(
-                    player_position=player_position,
-                    game_engine=game_engine
+        random.shuffle(enemy_classes_to_spawn)
+
+        for i, enemy_class in enumerate(enemy_classes_to_spawn):
+            difficulty = difficulties[i] if i < len(difficulties) else level_number
+
+            spawn_position = self._find_valid_spawn_position(
+                player_position,
+                game_engine
+            )
+
+            if spawn_position is None:
+                spawn_position = self._find_fallback_position(
+                    player_position,
+                    game_engine
                 )
 
-            if position is None:
+            if spawn_position is None:
                 continue
 
-            cell_x, cell_y = position
+            spawn_x, spawn_y = spawn_position
 
-            pixel_x = cell_x * self.cell_size
-            pixel_y = cell_y * self.cell_size
-
-            enemy_tank = self._create_enemy_tank(
-                pixel_x,
-                pixel_y,
-                difficulty
+            enemy_tank = enemy_class(
+                spawn_x,
+                spawn_y,
+                difficulty=difficulty
             )
+
+            if game_engine is not None:
+                game_engine.add_game_object(enemy_tank)
 
             enemy_tanks.append(enemy_tank)
 
+            print(
+                f"Enemy spawned: {getattr(enemy_tank, 'enemy_type', 'enemy')} "
+                f"at ({spawn_x}, {spawn_y})"
+            )
+
         return enemy_tanks
 
-    def spawn_enemy_tank_at(self, cell_x, cell_y, difficulty=1):
+    def spawn_enemy_tank_at(self, cell_x, cell_y, enemy_type="light", difficulty=1):
         """
-        Spawn one enemy tank at a specific cell.
+        Spawn one specific enemy tank type at a specific cell.
         """
 
         pixel_x = cell_x * self.cell_size
         pixel_y = cell_y * self.cell_size
 
-        return self._create_enemy_tank(pixel_x, pixel_y, difficulty)
+        return self._create_enemy_by_type(
+            pixel_x,
+            pixel_y,
+            enemy_type,
+            difficulty
+        )
 
-    def spawn_enemy_tank_at_pixels(self, x, y, difficulty=1):
+    def spawn_enemy_tank_at_pixels(self, x, y, enemy_type="light", difficulty=1):
         """
-        Spawn one enemy tank at a specific pixel position.
-        """
-
-        return self._create_enemy_tank(x, y, difficulty)
-
-    def spawn_enemy_tanks_near_objectives(self, objectives, difficulty=1):
-        """
-        Spawn one enemy tank near each objective.
+        Spawn one specific enemy tank type at a specific pixel position.
         """
 
-        enemy_tanks = []
+        return self._create_enemy_by_type(
+            x,
+            y,
+            enemy_type,
+            difficulty
+        )
 
-        for objective in objectives:
-            if not getattr(objective, "active", True):
-                continue
-
-            objective_cell_x = int(objective.x // self.cell_size)
-            objective_cell_y = int(objective.y // self.cell_size)
-
-            position = self._find_position_near_cell(
-                objective_cell_x,
-                objective_cell_y
-            )
-
-            if position is None:
-                position = self._find_valid_spawn_position()
-
-            if position is None:
-                continue
-
-            cell_x, cell_y = position
-
-            pixel_x = cell_x * self.cell_size
-            pixel_y = cell_y * self.cell_size
-
-            enemy_tank = self._create_enemy_tank(
-                pixel_x,
-                pixel_y,
-                difficulty
-            )
-
-            enemy_tank.defended_objective = objective
-
-            enemy_tanks.append(enemy_tank)
-
-        return enemy_tanks
-
-    def _get_difficulty(self, level_number, difficulty_manager=None):
+    def _create_enemy_by_type(self, x, y, enemy_type, difficulty):
         """
-        Get difficulty value for the current level.
+        Create an enemy tank by type.
         """
 
-        if difficulty_manager is None:
-            return max(1, level_number)
+        if enemy_type == "light":
+            return LightEnemyTank(x, y, difficulty=difficulty)
 
-        if hasattr(difficulty_manager, "get_difficulty"):
-            try:
-                return difficulty_manager.get_difficulty(level_number)
-            except TypeError:
-                return difficulty_manager.get_difficulty()
+        if enemy_type == "heavy":
+            return HeavyEnemyTank(x, y, difficulty=difficulty)
 
-        if hasattr(difficulty_manager, "difficulty"):
-            return difficulty_manager.difficulty
+        if enemy_type == "sniper":
+            return SniperEnemyTank(x, y, difficulty=difficulty)
 
-        return max(1, level_number)
-
-    def _get_enemy_count_for_level(self, level_number):
-        """
-        Decide how many enemies should appear in each level.
-
-        The project has a maximum of 3 levels.
-        """
-
-        if level_number <= 1:
-            return 2
-
-        if level_number == 2:
-            return 3
-
-        return 4
+        return LightEnemyTank(x, y, difficulty=difficulty)
 
     def _find_valid_spawn_position(self, player_position=None, game_engine=None):
         """
@@ -234,7 +180,7 @@ class EnemyTankSpawner:
                 player_position,
                 game_engine
             ):
-                return cell_x, cell_y
+                return cell_x * self.cell_size, cell_y * self.cell_size
 
         return None
 
@@ -254,47 +200,16 @@ class EnemyTankSpawner:
                     player_position,
                     game_engine
                 ):
-                    return cell_x, cell_y
+                    return cell_x * self.cell_size, cell_y * self.cell_size
 
         return None
 
     def _find_default_position(self):
         """
-        Return a default position if there is no map data.
+        Return a default pixel position if there is no map data.
         """
 
-        return 5, 5
-
-    def _find_position_near_cell(self, center_cell_x, center_cell_y):
-        """
-        Find a valid position near a specific cell.
-        """
-
-        possible_offsets = [
-            (1, 0),
-            (-1, 0),
-            (0, 1),
-            (0, -1),
-            (2, 0),
-            (-2, 0),
-            (0, 2),
-            (0, -2),
-            (1, 1),
-            (-1, 1),
-            (1, -1),
-            (-1, -1)
-        ]
-
-        random.shuffle(possible_offsets)
-
-        for offset_x, offset_y in possible_offsets:
-            cell_x = center_cell_x + offset_x
-            cell_y = center_cell_y + offset_y
-
-            if self._is_valid_spawn_position(cell_x, cell_y):
-                return cell_x, cell_y
-
-        return None
+        return 160, 160
 
     def _is_valid_spawn_position(
         self,
@@ -374,44 +289,36 @@ class EnemyTankSpawner:
 
         return False
 
-    def create_enemy_for_level(self, cell_x, cell_y, level_number):
-        """
-        Create an enemy tank according to the level number.
-        """
-
-        difficulty = max(1, level_number)
-
-        return self.spawn_enemy_tank_at(
-            cell_x,
-            cell_y,
-            difficulty=difficulty
-        )
-
     def create_enemies_for_level(self, level_number, count=None):
         """
-        Create enemies for a level.
+        Create exactly the three required enemy types for a level.
         """
-
-        difficulty = max(1, level_number)
-
-        if count is None:
-            count = self._get_enemy_count_for_level(level_number)
 
         enemy_tanks = []
 
-        for _ in range(count):
+        enemy_types = [
+            "light",
+            "heavy",
+            "sniper"
+        ]
+
+        for enemy_type in enemy_types:
             position = self._find_valid_spawn_position()
+
+            if position is None:
+                position = self._find_fallback_position()
 
             if position is None:
                 continue
 
-            cell_x, cell_y = position
+            pixel_x, pixel_y = position
 
             enemy_tanks.append(
-                self.spawn_enemy_tank_at(
-                    cell_x,
-                    cell_y,
-                    difficulty=difficulty
+                self._create_enemy_by_type(
+                    pixel_x,
+                    pixel_y,
+                    enemy_type,
+                    difficulty=level_number
                 )
             )
 

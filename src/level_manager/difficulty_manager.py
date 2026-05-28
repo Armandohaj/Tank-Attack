@@ -38,20 +38,11 @@ class DifficultyManager:
         """
         Get the number of enemy tanks for a given level.
 
-        Args:
-            level (int): Current level number.
-
-        Returns:
-            int: Number of enemy tanks.
+        Each level has exactly three enemy tanks:
+        one light, one heavy and one sniper.
         """
 
-        if level <= 1:
-            return 2
-
-        if level == 2:
-            return 3
-
-        return 4
+        return 3
 
     def get_enemy_tank_difficulties(self, level, num_tanks):
         """
