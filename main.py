@@ -10,6 +10,8 @@ import math
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
+from src.level_editor.screen_editor import ScreenEditor
+
 from src.engine.game_engine import GameEngine
 from src.engine.input_handler import InputHandler
 
@@ -182,14 +184,13 @@ def create_level_objectives(game_engine, level_manager, level_number):
     if map_data and hasattr(map_data, "cell_size"):
         cell_size = map_data.cell_size
 
-    if level_number == 1:
-        preferred_cell = (18, 8)
+    screen_editor = ScreenEditor()
+    level_config = screen_editor.load_level_config(level_number)
 
-    elif level_number == 2:
-        preferred_cell = (19, 9)
-
-    else:
-        preferred_cell = (20, 10)
+    preferred_cell = (
+        level_config["objective_x"],
+        level_config["objective_y"]
+    )
 
     base_cell, radar_cell = find_two_free_cells_together(
         preferred_cell,
@@ -217,7 +218,124 @@ def create_level_objectives(game_engine, level_manager, level_number):
 
     return objectives
 
+def distance_between_cells(cell_a, cell_b):
+    """
+    Calculate Manhattan distance between two cells.
+    """
 
+    return abs(cell_a[0] - cell_b[0]) + abs(cell_a[1] - cell_b[1])
+
+
+def is_valid_player_spawn_cell(cell_x, cell_y, map_data, game_engine, objectives, min_distance):
+    """
+    Check if a cell is valid for spawning the player.
+
+    The player cannot appear:
+    - outside the map
+    - on a wall or obstacle
+    - on another object
+    - closer than min_distance to the primary objectives
+    """
+
+    if map_data is None:
+        return False
+
+    if cell_x < 0 or cell_y < 0:
+        return False
+
+    if cell_x >= map_data.width or cell_y >= map_data.height:
+        return False
+
+    if map_data.get_cell(cell_x, cell_y) != map_data.EMPTY:
+        return False
+
+    for objective in objectives:
+        objective_cell_x = int(objective.x // map_data.cell_size)
+        objective_cell_y = int(objective.y // map_data.cell_size)
+
+        distance = distance_between_cells(
+            (cell_x, cell_y),
+            (objective_cell_x, objective_cell_y)
+        )
+
+        if distance < min_distance:
+            return False
+
+    if game_engine is not None:
+        for obj in game_engine.get_game_objects():
+            if not getattr(obj, "active", True):
+                continue
+
+            if getattr(obj, "tag", None) == "player":
+                continue
+
+            obj_cell_x = int(obj.x // map_data.cell_size)
+            obj_cell_y = int(obj.y // map_data.cell_size)
+
+            if obj_cell_x == cell_x and obj_cell_y == cell_y:
+                return False
+
+    return True
+
+
+def place_player_by_min_distance(player_tank, game_engine, level_manager, objectives, min_distance=8):
+    """
+    Place the player according to the editable min_distance value.
+
+    If min_distance is low, the player appears closer to the objectives.
+    If min_distance is high, the player appears farther from the objectives.
+    """
+
+    map_data = level_manager.map_data
+
+    if map_data is None:
+        return
+
+    valid_cells = []
+
+    for y in range(1, map_data.height - 1):
+        for x in range(1, map_data.width - 1):
+            if is_valid_player_spawn_cell(
+                x,
+                y,
+                map_data,
+                game_engine,
+                objectives,
+                min_distance
+            ):
+                valid_cells.append((x, y))
+
+    if not valid_cells:
+        print("Warning: No valid player spawn found. Keeping current position.")
+        return
+
+    def total_distance_to_objectives(cell):
+        total = 0
+
+        for objective in objectives:
+            objective_cell = (
+                int(objective.x // map_data.cell_size),
+                int(objective.y // map_data.cell_size)
+            )
+
+            total += distance_between_cells(cell, objective_cell)
+
+        return total
+
+    valid_cells.sort(
+        key=total_distance_to_objectives
+    )
+
+    best_cells = valid_cells[:min(10, len(valid_cells))]
+    spawn_cell = random.choice(best_cells)
+
+    player_tank.x = spawn_cell[0] * map_data.cell_size
+    player_tank.y = spawn_cell[1] * map_data.cell_size
+
+    print(
+        f"Player spawned at cell {spawn_cell} "
+        f"with min_distance={min_distance}"
+    )
 
 
 def distance_between_cells(cell_a, cell_b):
@@ -856,21 +974,30 @@ def create_game_state(game_engine, level_number):
     if hasattr(level_manager, "level_number"):
         level_manager.level_number = level_number
 
+    screen_editor = ScreenEditor()
+    level_config = screen_editor.load_level_config(level_number)
+
+    player_tank.health = level_config["player_health"]
+    player_tank.max_health = level_config["player_health"]
+
     objectives = create_level_objectives(game_engine, level_manager, level_number)
 
-    place_player_far_from_objectives(
+    place_player_by_min_distance(
         player_tank,
         game_engine,
         level_manager,
         objectives,
-        min_distance=8
+        min_distance=level_config["player_min_distance"]
     )
 
-    assign_single_guard_to_objectives(
+    guardian = assign_single_guard_to_objectives(
         level_manager.enemy_tanks,
         objectives,
         level_manager.map_data
     )
+
+    if guardian is not None:
+        guardian.guard_limit_radius = level_config["guardian_radius"]
 
     projectiles = []
 

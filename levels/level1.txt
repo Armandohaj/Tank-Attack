@@ -1,0 +1,6 @@
+# Configuración editable del nivel 1
+objective_x=20
+objective_y=4
+player_min_distance=11
+guardian_radius=120
+player_health=100

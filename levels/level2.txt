@@ -1,0 +1,4 @@
+objective_x=5
+objective_y=9
+player_min_distance=11
+guardian_radius=100

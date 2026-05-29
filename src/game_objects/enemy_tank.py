@@ -453,7 +453,7 @@ class LightEnemyTank(EnemyTank):
         self.tag = "enemy"
         self.enemy_type = "light"
 
-        self.damage = 15
+        self.damage = 10
         self.fire_cooldown = 0.35
 
         self.sight_range = 180 + (difficulty * 20)
@@ -485,7 +485,7 @@ class HeavyEnemyTank(EnemyTank):
         self.tag = "enemy"
         self.enemy_type = "heavy"
 
-        self.damage = 35
+        self.damage = 20
         self.fire_cooldown = 0.9
 
         self.sight_range = 160 + (difficulty * 20)
@@ -518,7 +518,7 @@ class SniperEnemyTank(EnemyTank):
         self.tag = "enemy"
         self.enemy_type = "sniper"
 
-        self.damage = 25
+        self.damage = 15
         self.fire_cooldown = 0.7
 
         self.sight_range = 280 + (difficulty * 25)
