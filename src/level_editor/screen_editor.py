@@ -69,6 +69,7 @@ class ScreenEditor:
                 "player_min_distance": 8,
                 "guardian_radius": 160,
                 "player_health": 150
+                
             }
 
         if level_number == 2:
@@ -76,12 +77,14 @@ class ScreenEditor:
                 "objective_x": 19,
                 "objective_y": 9,
                 "player_min_distance": 9,
-                "guardian_radius": 160
+                "guardian_radius": 160,
+                "player_health" : 100
             }
 
         return {
             "objective_x": 20,
             "objective_y": 10,
             "player_min_distance": 10,
-            "guardian_radius": 150
+            "guardian_radius": 150,
+            "player_health" : 100
         }

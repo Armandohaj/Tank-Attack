@@ -11,7 +11,7 @@ import math
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from src.level_editor.screen_editor import ScreenEditor
-
+from src.services.prolog_service import PrologService
 from src.engine.game_engine import GameEngine
 from src.engine.input_handler import InputHandler
 
@@ -909,7 +909,7 @@ def render_start_screen(screen):
 
 
 
-def render_hud(screen, current_level, player_tank, objectives):
+def render_hud(screen, current_level, player_tank, objectives, player_lives):
     """
     Render basic HUD information.
     """
@@ -920,8 +920,11 @@ def render_hud(screen, current_level, player_tank, objectives):
     screen.blit(level_text, (10, 10))
 
     if player_tank:
-        health_text = font.render(f"Vida: {player_tank.health}", True, (255, 255, 255))
+        health_text = font.render(f"Salud: {player_tank.health}", True, (255, 255, 255))
         screen.blit(health_text, (10, 38))
+
+    lives_text = font.render(f"Vidas: {player_lives}", True, (255, 255, 255))
+    screen.blit(lives_text, (10, 66))
 
     remaining_objectives = len([
         obj for obj in objectives
@@ -933,7 +936,215 @@ def render_hud(screen, current_level, player_tank, objectives):
         True,
         (255, 255, 255)
     )
-    screen.blit(objective_text, (10, 66))
+    screen.blit(objective_text, (10, 94))
+
+
+def get_cell_position(obj, map_data):
+    """
+    Convert an object's pixel position to map cell position.
+    """
+
+    cell_x = int(obj.x // map_data.cell_size)
+    cell_y = int(obj.y // map_data.cell_size)
+
+    return cell_x, cell_y
+
+
+def get_map_walls_for_prolog(map_data):
+    """
+    Get all blocked cells from the map to send them to Prolog.
+    """
+
+    walls = []
+
+    if map_data is None:
+        return walls
+
+    for y in range(map_data.height):
+        for x in range(map_data.width):
+            if map_data.is_obstacle_at(x, y):
+                walls.append((x, y))
+
+    return walls
+
+
+def get_objectives_for_prolog(objectives, map_data):
+    """
+    Convert game objectives to Prolog facts.
+    """
+
+    prolog_objectives = []
+
+    for index, objective in enumerate(objectives, start=1):
+        cell_x, cell_y = get_cell_position(objective, map_data)
+
+        objective_type = getattr(objective, "objective_type", "")
+
+        if objective_type == "radar":
+            prolog_type = "radar"
+        else:
+            prolog_type = "bunker"
+
+        prolog_objectives.append(
+            (
+                index,
+                cell_x,
+                cell_y,
+                prolog_type
+            )
+        )
+
+    return prolog_objectives
+
+
+def get_enemy_tanks_for_prolog(enemy_tanks, map_data):
+    """
+    Convert enemy tanks to Prolog facts.
+    """
+
+    prolog_tanks = []
+
+    for index, enemy in enumerate(enemy_tanks, start=1):
+        enemy.prolog_id = index
+
+        cell_x, cell_y = get_cell_position(enemy, map_data)
+
+        enemy_type = getattr(enemy, "enemy_type", "light")
+
+        prolog_tanks.append(
+            (
+                index,
+                cell_x,
+                cell_y,
+                enemy_type,
+                int(enemy.health)
+            )
+        )
+
+    return prolog_tanks
+
+
+def load_current_level_in_prolog(prolog_service, level_manager, objectives, player_tank):
+    """
+    Load the current game level into Prolog.
+    """
+
+    map_data = level_manager.map_data
+
+    if map_data is None:
+        return
+
+    player_cell_x, player_cell_y = get_cell_position(player_tank, map_data)
+
+    walls = get_map_walls_for_prolog(map_data)
+
+    prolog_objectives = get_objectives_for_prolog(
+        objectives,
+        map_data
+    )
+
+    prolog_tanks = get_enemy_tanks_for_prolog(
+        level_manager.enemy_tanks,
+        map_data
+    )
+
+    prolog_service.cargar_nivel(
+        ancho=map_data.width,
+        alto=map_data.height,
+        muros=walls,
+        objetivos=prolog_objectives,
+        tanques=prolog_tanks,
+        jugador=(player_cell_x, player_cell_y)
+    )
+
+    print("Level loaded in Prolog")
+
+
+def move_enemy_away_from_player(enemy_tank, player_tank, delta_time, map_data):
+    """
+    Move the enemy tank away from the player.
+    Used when Prolog returns the action 'retroceder'.
+    """
+
+    dx = enemy_tank.x - player_tank.x
+    dy = enemy_tank.y - player_tank.y
+
+    if abs(dx) > abs(dy):
+        if dx >= 0:
+            enemy_tank.set_direction(enemy_tank.RIGHT)
+            moved = enemy_tank.move_right(delta_time, map_data)
+
+            if not moved:
+                if dy >= 0:
+                    enemy_tank.set_direction(enemy_tank.DOWN)
+                    return enemy_tank.move_down(delta_time, map_data)
+
+                enemy_tank.set_direction(enemy_tank.UP)
+                return enemy_tank.move_up(delta_time, map_data)
+
+            return moved
+
+        enemy_tank.set_direction(enemy_tank.LEFT)
+        moved = enemy_tank.move_left(delta_time, map_data)
+
+        if not moved:
+            if dy >= 0:
+                enemy_tank.set_direction(enemy_tank.DOWN)
+                return enemy_tank.move_down(delta_time, map_data)
+
+            enemy_tank.set_direction(enemy_tank.UP)
+            return enemy_tank.move_up(delta_time, map_data)
+
+        return moved
+
+    if dy >= 0:
+        enemy_tank.set_direction(enemy_tank.DOWN)
+        moved = enemy_tank.move_down(delta_time, map_data)
+
+        if not moved:
+            if dx >= 0:
+                enemy_tank.set_direction(enemy_tank.RIGHT)
+                return enemy_tank.move_right(delta_time, map_data)
+
+            enemy_tank.set_direction(enemy_tank.LEFT)
+            return enemy_tank.move_left(delta_time, map_data)
+
+        return moved
+
+    enemy_tank.set_direction(enemy_tank.UP)
+    moved = enemy_tank.move_up(delta_time, map_data)
+
+    if not moved:
+        if dx >= 0:
+            enemy_tank.set_direction(enemy_tank.RIGHT)
+            return enemy_tank.move_right(delta_time, map_data)
+
+        enemy_tank.set_direction(enemy_tank.LEFT)
+        return enemy_tank.move_left(delta_time, map_data)
+
+    return moved
+
+
+def respawn_player(player_tank, game_engine, level_manager, objectives, level_config):
+    """
+    Respawn the player after losing one life.
+    """
+
+    player_tank.active = True
+    player_tank.health = level_config.get("player_health", 100)
+    player_tank.max_health = level_config.get("player_health", 100)
+    player_tank.speed = level_config.get("player_speed", 5)
+
+    place_player_by_min_distance(
+        player_tank,
+        game_engine,
+        level_manager,
+        objectives,
+        min_distance=level_config.get("player_min_distance", 8)
+    )
+
+    print("Player respawned")
+        
 
 
 def create_game_state(game_engine, level_number):
@@ -965,7 +1176,7 @@ def create_game_state(game_engine, level_number):
     if hasattr(level_manager, "level_number"):
         level_manager.level_number = level_number
 
-    level_manager.initialize(player_tank)
+    level_manager.initialize(player_tank, level_number)
 
     # Set again after initialize, in case initialize resets it.
     if hasattr(level_manager, "current_level"):
@@ -977,8 +1188,8 @@ def create_game_state(game_engine, level_number):
     screen_editor = ScreenEditor()
     level_config = screen_editor.load_level_config(level_number)
 
-    player_tank.health = level_config["player_health"]
-    player_tank.max_health = level_config["player_health"]
+    player_tank.health = level_config.get("player_health", 100)
+    player_tank.max_health = level_config.get("player_health", 100)
 
     objectives = create_level_objectives(game_engine, level_manager, level_number)
 
@@ -999,11 +1210,20 @@ def create_game_state(game_engine, level_number):
     if guardian is not None:
         guardian.guard_limit_radius = level_config["guardian_radius"]
 
+    prolog_service = PrologService("logic.pl")
+
+    load_current_level_in_prolog(
+            prolog_service,
+            level_manager,
+            objectives,
+            player_tank
+        )
+
     projectiles = []
 
     visual_effects = VisualEffectsManager()
 
-    return player_tank, level_manager, objectives, projectiles, visual_effects
+    return player_tank, level_manager, objectives, projectiles, visual_effects,prolog_service
 
 
 def render_game_scene(
@@ -1017,7 +1237,8 @@ def render_game_scene(
     level_manager,
     objectives,
     projectiles,
-    current_level
+    current_level,
+    player_lives
 ):
     """
     Render the complete game scene.
@@ -1056,7 +1277,7 @@ def render_game_scene(
     if hasattr(visual_effects, "render"):
         visual_effects.render(game_engine.screen)
 
-    render_hud(game_engine.screen, current_level, player_tank, objectives)
+    render_hud(game_engine.screen, current_level, player_tank, objectives, player_lives)
 
 
 def main():
@@ -1083,10 +1304,12 @@ def main():
 
         current_level = 1
 
-        player_tank, level_manager, objectives, projectiles, visual_effects = create_game_state(
+        player_tank, level_manager, objectives, projectiles, visual_effects, prolog_service = create_game_state(
             game_engine,
             current_level
         )
+        
+        player_lives = 3
 
         game_over = False
         level_completed = False
@@ -1125,10 +1348,11 @@ def main():
                         if final_victory:
                             current_level = 1
 
-                        player_tank, level_manager, objectives, projectiles, visual_effects = create_game_state(
+                        player_tank, level_manager, objectives, projectiles, visual_effects, prolog_service = create_game_state(
                             game_engine,
                             current_level
                         )
+                        player_lives = 3
 
                         game_over = False
                         level_completed = False
@@ -1138,10 +1362,11 @@ def main():
                         if current_level < MAX_LEVEL:
                             current_level += 1
 
-                            player_tank, level_manager, objectives, projectiles, visual_effects = create_game_state(
+                            player_tank, level_manager, objectives, projectiles, visual_effects, prolog_service = create_game_state(
                                 game_engine,
                                 current_level
                             )
+                            player_lives = 3
 
                             game_over = False
                             level_completed = False
@@ -1175,7 +1400,9 @@ def main():
                     level_manager,
                     objectives,
                     projectiles,
-                    current_level
+                    current_level,
+                    player_lives
+                    
                 )
 
                 if game_over:
@@ -1252,6 +1479,21 @@ def main():
             # -------------------------------------------------
             # Update enemies
             # -------------------------------------------------
+
+                if player_tank.active:
+                    player_cell_x, player_cell_y = get_cell_position(
+                        player_tank,
+                        level_manager.map_data
+                )
+
+                prolog_service.actualizar_jugador(
+                    player_cell_x,
+                    player_cell_y
+                )
+
+
+
+
             game_objects_for_ai = (
                 [player_tank]
                 + level_manager.enemy_tanks
@@ -1261,11 +1503,78 @@ def main():
 
             for enemy_tank in level_manager.enemy_tanks[:]:
                 if enemy_tank.active:
-                    new_projectile = enemy_tank.update(
-                        game_engine.delta_time,
-                        level_manager.map_data,
-                        game_objects_for_ai
-                    )
+
+                    if not hasattr(enemy_tank, "prolog_timer"):
+                        enemy_tank.prolog_timer = random.uniform(0.0, 1.0)
+                        enemy_tank.prolog_action = "acercarse"
+                        enemy_tank.prolog_route = []
+
+                    enemy_tank.prolog_timer += game_engine.delta_time
+
+                    if enemy_tank.prolog_timer >= 3.0:
+                        enemy_cell_x, enemy_cell_y = get_cell_position(
+                            enemy_tank,
+                            level_manager.map_data
+                        )
+
+                        prolog_service.actualizar_tanque(
+                            enemy_tank.prolog_id,
+                            enemy_cell_x,
+                            enemy_cell_y,
+                            int(enemy_tank.health)
+                        )
+
+                        prolog_result = prolog_service.obtener_accion_y_ruta(
+                            enemy_tank.prolog_id
+                        )
+
+                        enemy_tank.prolog_action = prolog_result["accion"]
+                        enemy_tank.prolog_route = prolog_result["ruta"]
+
+                        print(
+                            f"[PROLOG] Tanque {enemy_tank.prolog_id} "
+                            f"vida={enemy_tank.health} "
+                            f"decision={enemy_tank.prolog_action} "
+                            f"ruta={enemy_tank.prolog_route}"
+                        )
+
+                        enemy_tank.prolog_timer = 0
+
+                    new_projectile = None
+
+                    action = str(getattr(enemy_tank, "prolog_action", ""))
+
+                    last_action = getattr(enemy_tank, "last_printed_action", None)
+
+                    if action != last_action:
+                        print(
+                            f"[PYTHON] Tanque {enemy_tank.prolog_id} "
+                            f"obedece a Prolog: {action}"
+                        )
+
+                        enemy_tank.last_printed_action = action
+
+                    if action.startswith("retroceder"):
+                        move_enemy_away_from_player(
+                            enemy_tank,
+                            player_tank,
+                            game_engine.delta_time,
+                            level_manager.map_data
+                        )
+
+                    elif getattr(enemy_tank, "prolog_action", "") == "atacar":
+                        new_projectile = enemy_tank.update(
+                            game_engine.delta_time,
+                            level_manager.map_data,
+                            game_objects_for_ai
+                        )
+
+                    else:
+                        new_projectile = enemy_tank.update(
+                            game_engine.delta_time,
+                            level_manager.map_data,
+                            game_objects_for_ai
+                        )
 
                     keep_guardian_near_objectives(
                         enemy_tank,
@@ -1365,7 +1674,20 @@ def main():
             # Check game over
             # -------------------------------------------------
             if not player_tank.active or player_tank.health <= 0:
-                game_over = True
+                player_lives -= 1
+
+                if player_lives > 0:
+                    level_config = ScreenEditor().load_level_config(current_level)
+
+                    respawn_player(
+                        player_tank,
+                        game_engine,
+                        level_manager,
+                        objectives,
+                        level_config
+                    )
+                else:
+                    game_over = True
 
             # -------------------------------------------------
             # Check level completed
@@ -1387,7 +1709,8 @@ def main():
                 level_manager,
                 objectives,
                 projectiles,
-                current_level
+                current_level,
+                player_lives
             )
 
             pygame.display.flip()

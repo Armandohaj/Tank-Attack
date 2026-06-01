@@ -1,4 +1,6 @@
-objective_x=5
-objective_y=9
+# Configuración editable del nivel 2
+objective_x=20
+objective_y=4
 player_min_distance=11
-guardian_radius=100
+guardian_radius=300
+player_health=100
