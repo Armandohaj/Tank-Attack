@@ -1505,13 +1505,13 @@ def main():
                 if enemy_tank.active:
 
                     if not hasattr(enemy_tank, "prolog_timer"):
-                        enemy_tank.prolog_timer = random.uniform(0.0, 1.0)
+                        enemy_tank.prolog_timer = random.uniform(0.0, 0.5)
                         enemy_tank.prolog_action = "acercarse"
                         enemy_tank.prolog_route = []
 
                     enemy_tank.prolog_timer += game_engine.delta_time
 
-                    if enemy_tank.prolog_timer >= 3.0:
+                    if enemy_tank.prolog_timer >= 1.0:
                         enemy_cell_x, enemy_cell_y = get_cell_position(
                             enemy_tank,
                             level_manager.map_data
